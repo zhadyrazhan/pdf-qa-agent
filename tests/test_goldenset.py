@@ -1,0 +1,50 @@
+"""Проверка структуры golden set (eval/goldenset.json) — быстрый sanity-check без сети,
+чтобы опечатка в JSON или отсутствующее поле ловились в CI, а не при запуске eval."""
+import json
+from pathlib import Path
+
+GOLDENSET_PATH = Path(__file__).resolve().parents[1] / "eval" / "goldenset.json"
+
+REQUIRED_FIELDS = {"id", "pdf", "question", "expected_answerable", "expected_keywords", "expected_pages"}
+
+
+def _load():
+    return json.loads(GOLDENSET_PATH.read_text(encoding="utf-8"))
+
+
+def test_goldenset_file_is_valid_json_list():
+    data = _load()
+    assert isinstance(data, list)
+    assert len(data) > 0
+
+
+def test_every_item_has_required_fields():
+    for item in _load():
+        missing = REQUIRED_FIELDS - item.keys()
+        assert not missing, f"{item.get('id', '<no id>')} missing fields: {missing}"
+
+
+def test_ids_are_unique():
+    ids = [item["id"] for item in _load()]
+    assert len(ids) == len(set(ids)), "duplicate ids in golden set"
+
+
+def test_unanswerable_items_have_no_expected_keywords_or_pages():
+    for item in _load():
+        if not item["expected_answerable"]:
+            assert item["expected_keywords"] == []
+            assert item["expected_pages"] == []
+
+
+def test_answerable_items_have_at_least_one_keyword():
+    for item in _load():
+        if item["expected_answerable"]:
+            assert item["expected_keywords"], f"{item['id']} has no expected_keywords"
+
+
+def test_covers_both_text_layer_and_scanned_documents():
+    """Golden set должен включать вопросы и к тексто-слойным, и к отсканированным
+    частям документов — иначе eval не проверяет требуемое поведение агента."""
+    notes = " ".join(item.get("note", "") for item in _load())
+    assert "OCR" in notes
+    assert "текстовый слой" in notes

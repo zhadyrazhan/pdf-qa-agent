@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# Secrets
+.env
+
+# Course PDF source files (large binaries, not part of the codebase)
+pdf-files/
+
+# Generated eval output
+eval/eval_report.json
+
+# OS
+.DS_Store

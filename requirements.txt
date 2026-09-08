@@ -1,0 +1,13 @@
+# Основные зависимости pdf_qa_agent
+anthropic>=1.3.0
+pypdfium2>=5.13.0
+pydantic>=2.0
+
+# Тесты и eval
+pytest>=8.0
+fpdf2>=2.7  # генерация синтетических PDF-фикстур для тестов (без сети)
+
+# Опционально — используются только в отдельных заданиях этого урока
+# (assignment_2_docling.py / assignment_3_ocr.py), не требуются для pdf_qa_agent:
+# docling
+# rapidocr
