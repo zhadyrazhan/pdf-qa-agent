@@ -53,6 +53,33 @@ The test suite is fully offline and does not require an API key.
 
 ## Usage
 
+### Web interface
+
+The web interface uses FastAPI for the PDF/Q&A API and Next.js for the frontend.
+Start the API in one terminal:
+
+```bash
+python3 -m pip install -r requirements.txt
+export ANTHROPIC_API_KEY=...
+uvicorn api.main:app --reload --port 8000
+```
+
+Start the Next.js app in another terminal:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open `http://localhost:3000`, upload a PDF, or paste a public PDF URL, and ask
+questions. URL fetching is constrained to HTTP(S) URLs that resolve only to
+public IPs; redirects are checked again, proxy environment variables are
+ignored, requests have a 30-second timeout, and responses are capped at 25 MB
+before parsing. Parsed documents are kept in memory for the current server
+process; use a database or object storage before deploying multiple API workers
+or adding authentication.
+
 Ask one question:
 
 ```bash

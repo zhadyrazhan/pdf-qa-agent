@@ -19,3 +19,10 @@ eval/eval_report.json
 
 # OS
 .DS_Store
+
+# Next.js
+node_modules/
+.next/
+out/
+frontend/.env.local
+*.tsbuildinfo

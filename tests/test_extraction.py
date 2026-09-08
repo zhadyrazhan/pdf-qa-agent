@@ -3,6 +3,8 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
+
 from pdf_qa_agent.extraction import PDFExtractor, build_context
 from pdf_qa_agent.retry import RetryConfig
 from pdf_qa_agent.schemas import ExtractedPage
@@ -71,3 +73,37 @@ def test_text_layer_min_chars_threshold_is_configurable(blank_pdf):
 
     assert pages[0].source == "text_layer"
     client.messages.parse.assert_not_called()
+
+
+def test_extract_from_url_fetches_bytes_and_parses_them(text_pdf, monkeypatch):
+    """PDFExtractor.extract() принимает http(s) URL: скачивает байты через
+    pdf_qa_agent.fetch.fetch_pdf_bytes и грузит их в pdfium напрямую из памяти —
+    без записи на диск. fetch_pdf_bytes замокан, реальной сети нет."""
+    pdf_bytes = text_pdf.read_bytes()
+    fake_fetch = MagicMock(return_value=pdf_bytes)
+    monkeypatch.setattr("pdf_qa_agent.extraction.fetch_pdf_bytes", fake_fetch)
+
+    client = MagicMock()  # текстовый слой есть -> VLM не должен вызываться
+    extractor = PDFExtractor(client=client, max_download_bytes=123, fetch_timeout=7.0)
+
+    pages = extractor.extract("https://example.com/report.pdf")
+
+    assert len(pages) == 2
+    assert "Total revenue" in pages[0].text
+    fake_fetch.assert_called_once_with(
+        "https://example.com/report.pdf", max_bytes=123, timeout=7.0
+    )
+    client.messages.parse.assert_not_called()
+
+
+def test_extract_from_url_propagates_fetch_errors(monkeypatch):
+    from pdf_qa_agent.fetch import UnsafeURLError
+
+    def _raise(*args, **kwargs):
+        raise UnsafeURLError("blocked: resolves to a private address")
+
+    monkeypatch.setattr("pdf_qa_agent.extraction.fetch_pdf_bytes", _raise)
+    extractor = PDFExtractor(client=MagicMock())
+
+    with pytest.raises(UnsafeURLError):
+        extractor.extract("http://169.254.169.254/doc.pdf")

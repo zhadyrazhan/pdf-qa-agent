@@ -21,6 +21,7 @@ from typing import Callable, List
 import anthropic
 import pypdfium2 as pdfium
 
+from pdf_qa_agent.fetch import DEFAULT_FETCH_TIMEOUT, DEFAULT_MAX_PDF_BYTES, fetch_pdf_bytes, is_url
 from pdf_qa_agent.retry import RetryConfig, with_retry
 from pdf_qa_agent.schemas import ExtractedPage, PageContent
 
@@ -49,18 +50,22 @@ class PDFExtractor:
         render_scale: float = DEFAULT_RENDER_SCALE,
         retry_config: RetryConfig | None = None,
         log: Callable[[str], None] | None = None,
+        max_download_bytes: int = DEFAULT_MAX_PDF_BYTES,
+        fetch_timeout: float = DEFAULT_FETCH_TIMEOUT,
     ):
         self.client = client or anthropic.Anthropic()
         self.model = model
         self.text_layer_min_chars = text_layer_min_chars
         self.render_scale = render_scale
         self._log = log or (lambda msg: print(msg, file=sys.stderr))
+        self.max_download_bytes = max_download_bytes
+        self.fetch_timeout = fetch_timeout
         # Оборачиваем сетевой вызов ретраями один раз в конструкторе, чтобы retry_config
         # можно было настраивать per-instance (в т.ч. в тестах, с sleep_fn=no-op).
         self._call_vlm_with_retry = with_retry(retry_config)(self._call_vlm)
 
-    def extract(self, pdf_path: str | Path) -> List[PageContent]:
-        pdf = pdfium.PdfDocument(str(pdf_path))
+    def extract(self, pdf_source: str | Path) -> List[PageContent]:
+        pdf = self._open(pdf_source)
         pages: List[PageContent] = []
         total_pages = len(pdf)
 
@@ -78,6 +83,16 @@ class PDFExtractor:
                 pages.append(PageContent(page=page_num, text=extracted.text, source="vlm_ocr"))
 
         return pages
+
+    def _open(self, pdf_source: str | Path) -> pdfium.PdfDocument:
+        source_str = str(pdf_source)
+        if is_url(source_str):
+            self._log(f"Fetching PDF from URL: {source_str}")
+            pdf_bytes = fetch_pdf_bytes(
+                source_str, max_bytes=self.max_download_bytes, timeout=self.fetch_timeout
+            )
+            return pdfium.PdfDocument(pdf_bytes)
+        return pdfium.PdfDocument(source_str)
 
     def _render_page_b64(self, page: "pdfium.PdfPage") -> str:
         bitmap = page.render(scale=self.render_scale)
