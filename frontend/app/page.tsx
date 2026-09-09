@@ -190,12 +190,17 @@ export default function Home() {
                   inputMode="url"
                   placeholder="https://example.com/report.pdf"
                   value={url}
-                  onChange={(event) => setUrl(event.target.value)}
+                  onChange={(event) => {
+                    setUrl(event.target.value);
+                    setDocument(null);
+                    setMessages([]);
+                    setError("");
+                  }}
                 />
               </label>
               <p className="muted small">The server fetches the file directly — only public http(s) links to a PDF are supported.</p>
-              <button className="primary-button" disabled={!url.trim() || loading} type="submit">
-                {loading && !document ? "Fetching…" : "Load from URL"}
+              <button className={`primary-button${document ? " parsed" : ""}`} disabled={!url.trim() || loading} type="submit">
+                {loading && !document ? "Fetching…" : document ? "Ready" : "Load from URL"}
               </button>
             </form>
           )}
@@ -243,7 +248,6 @@ export default function Home() {
 
       {document && (
         <section className="preview-panel">
-          <div className="section-label">03 · Source</div>
           <h2>Extracted text</h2>
           <p className="muted">This is the source context used by the agent.</p>
           <div className="page-list">
