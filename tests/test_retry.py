@@ -1,16 +1,16 @@
-"""Тесты retry/backoff-логики. Задержки не выполняются реально (sleep_fn=no-op),
-поэтому тесты быстрые, но проверяют весь путь: число попыток, итоговый успех,
-и то, что не-retryable ошибки не ретраятся вовсе."""
-import anthropic
+"""Tests for the retry/backoff logic. Delays are stubbed out (sleep_fn=no-op),
+so tests are fast but still cover the full path: attempt count, eventual
+success, and that non-retryable errors aren't retried at all."""
+import openai
 import httpx
 import pytest
 
 from pdf_qa_agent.retry import RetryConfig, RetryExhaustedError, compute_delay, with_retry
 
 
-def _fake_connection_error() -> anthropic.APIConnectionError:
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
-    return anthropic.APIConnectionError(request=request)
+def _fake_connection_error() -> openai.APIConnectionError:
+    request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+    return openai.APIConnectionError(request=request)
 
 
 def test_succeeds_without_retry_when_no_error():
@@ -21,7 +21,7 @@ def test_succeeds_without_retry_when_no_error():
         return "ok"
 
     assert func() == "ok"
-    assert calls == []  # ни одной задержки — успех с первой попытки
+    assert calls == []  # no delay — succeeded on the first attempt
 
 
 def test_retries_then_succeeds():
@@ -51,7 +51,7 @@ def test_raises_retry_exhausted_after_max_attempts():
 
     assert attempts["n"] == 3
     assert exc_info.value.attempts == 3
-    assert isinstance(exc_info.value.last_error, anthropic.APIConnectionError)
+    assert isinstance(exc_info.value.last_error, openai.APIConnectionError)
 
 
 def test_non_retryable_exception_propagates_immediately():
@@ -65,7 +65,7 @@ def test_non_retryable_exception_propagates_immediately():
     with pytest.raises(ValueError):
         raises_value_error()
 
-    assert attempts["n"] == 1  # ни одной повторной попытки
+    assert attempts["n"] == 1  # no retry attempted
 
 
 def test_on_retry_callback_invoked_with_attempt_and_delay():
@@ -82,7 +82,7 @@ def test_on_retry_callback_invoked_with_attempt_and_delay():
     with pytest.raises(RetryExhaustedError):
         always_fails()
 
-    assert len(calls) == 1  # 2 попытки -> 1 промежуточный retry
+    assert len(calls) == 1  # 2 attempts -> 1 intermediate retry
     assert calls[0][0] == 1
 
 

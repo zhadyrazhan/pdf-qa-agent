@@ -1,8 +1,9 @@
-"""CLI для PDF Q&A агента.
+"""CLI for PDF-QA-Agent.
 
-Использование:
-    python3 -m pdf_qa_agent.cli <путь_к_pdf> -q "Вопрос?"
-    python3 -m pdf_qa_agent.cli <путь_к_pdf>              # интерактивный режим
+Usage:
+    python3 -m pdf_qa_agent.cli <pdf_path_or_url> -q "Question?"
+    python3 -m pdf_qa_agent.cli <pdf_path_or_url>              # interactive mode
+    python3 -m pdf_qa_agent.cli https://example.com/report.pdf -q "What is this report about?"
 """
 import argparse
 import json
@@ -11,25 +12,31 @@ from pathlib import Path
 
 from pdf_qa_agent.agent import PDFQAAgent
 from pdf_qa_agent.extraction import DEFAULT_MODEL
+from pdf_qa_agent.fetch import PDFFetchError, PDFTooLargeError, UnsafeURLError, is_url
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Интеллектуальный агент для ответов на вопросы по PDF (текст или скан)."
+        description="Answers questions about a PDF (text or scan, local file or URL)."
     )
-    parser.add_argument("pdf_path", type=Path, help="Путь к PDF-документу")
-    parser.add_argument("-q", "--question", help="Разовый вопрос (без него — интерактивный режим)")
-    parser.add_argument("--model", default=DEFAULT_MODEL, help=f"Модель Claude (по умолчанию {DEFAULT_MODEL})")
+    parser.add_argument("pdf_source", help="Path to a PDF document or an http(s) URL")
+    parser.add_argument("-q", "--question", help="A single question (omit for interactive mode)")
+    parser.add_argument("--model", default=DEFAULT_MODEL, help=f"OpenAI model (default: {DEFAULT_MODEL})")
     args = parser.parse_args()
 
-    if not args.pdf_path.exists():
-        print(f"Error: file not found: {args.pdf_path}", file=sys.stderr)
+    source = args.pdf_source
+    if not is_url(source) and not Path(source).exists():
+        print(f"Error: file not found: {source}", file=sys.stderr)
         sys.exit(1)
 
     agent = PDFQAAgent(model=args.model)
 
-    print(f"Loading and extracting: {args.pdf_path}", file=sys.stderr)
-    agent.load(args.pdf_path)
+    print(f"Loading and extracting: {source}", file=sys.stderr)
+    try:
+        agent.load(source)
+    except (UnsafeURLError, PDFTooLargeError, PDFFetchError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
     n_text = sum(1 for p in agent.pages if p.source == "text_layer")
     n_vlm = sum(1 for p in agent.pages if p.source == "vlm_ocr")
     print(
@@ -42,13 +49,13 @@ def main() -> None:
         print(json.dumps({"question": args.question, **result.model_dump()}, indent=2, ensure_ascii=False))
         return
 
-    print("Интерактивный режим. Введите вопрос (или 'exit' для выхода).", file=sys.stderr)
+    print("Interactive mode. Type a question (or 'exit' to quit).", file=sys.stderr)
     while True:
         try:
-            question = input("\nВопрос: ").strip()
+            question = input("\nQuestion: ").strip()
         except (EOFError, KeyboardInterrupt):
             break
-        if not question or question.lower() in ("exit", "quit", "выход"):
+        if not question or question.lower() in ("exit", "quit"):
             break
         result = agent.ask(question)
         print(json.dumps({"question": question, **result.model_dump()}, indent=2, ensure_ascii=False))

@@ -16,14 +16,14 @@
 1. Сначала пробуем текстовый слой (`pypdfium2`) — дёшево и точно для text-based PDF.
 2. Если текстового слоя нет или он короче `TEXT_LAYER_MIN_CHARS` (страница — скан или таблица,
    отрисованная как изображение), страница рендерится в PNG и распознаётся мультимодальной
-   моделью Claude (VLM OCR) с промптом, сохраняющим структуру документа в markdown.
+   моделью OpenAI (VLM OCR) с промптом, сохраняющим структуру документа в markdown.
 3. Извлечённый текст всех страниц собирается в единый контекст документа.
-4. Вопрос пользователя вместе с контекстом отправляется модели через `client.messages.parse`
-   с pydantic-схемой `AgentAnswer` — модель обязана вернуть структурированный
-   ответ: `answer`, `answerable` (найден ли ответ в документе) и `citations` (страница + дословная
-   цитата на каждый использованный факт).
+4. Вопрос пользователя вместе с контекстом отправляется модели через
+   `client.chat.completions.parse` с pydantic-схемой `AgentAnswer` — модель обязана
+   вернуть структурированный ответ: `answer`, `answerable` (найден ли ответ в документе)
+   и `citations` (страница + дословная цитата на каждый использованный факт).
 
-Все сетевые вызовы к Anthropic API (и OCR, и сам вопрос-ответ) обёрнуты **retry с
+Все сетевые вызовы к OpenAI API (и OCR, и сам вопрос-ответ) обёрнуты **retry с
 экспоненциальным backoff и джиттером** (`pdf_qa_agent/retry.py`): временные сетевые ошибки,
 таймауты, rate limit и 5xx ретраятся; ошибки валидации запроса — нет, т.к. повтор не поможет.
 
@@ -43,8 +43,7 @@ eval/
   eval_report.json        (генерируется run_eval.py)
 
 pdf-files/               исходные PDF из golden set (в .gitignore)
-tests/                   pytest-тесты, без сети (все вызовы Anthropic API замоканы)
-pdf_qa_agent.py          CLI-обёртка, сохраняющая обратную совместимость
+tests/                   pytest-тесты, без сети (все вызовы OpenAI API замоканы)
 ```
 
 ## Установка
@@ -54,10 +53,39 @@ cd /Users/zhadyrazhan/Documents/llm-engineer/pdf-qa-agent
 pip install -r requirements.txt
 ```
 
-Нужен ключ Anthropic API: `export ANTHROPIC_API_KEY=...` (или активный профиль `ant auth login`).
+Создайте `.env` из `.env.example` и укажите ключ OpenAI API в `OPENAI_API_KEY=...`.
 Без ключа работают только тесты (`tests/`) — они не обращаются к сети.
 
 ## Использование
+
+### Веб-интерфейс
+
+Веб-интерфейс использует FastAPI для API и Next.js для фронтенда.
+Запустите API в одном терминале:
+
+```bash
+python3 -m pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
+```
+
+Запустите Next.js-приложение в другом терминале:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Откройте `http://localhost:3000`, загрузите PDF или вставьте публичную ссылку на PDF,
+и задайте вопрос. Загрузка файла и загрузка по ссылке ограничены 1 МБ. Ссылки
+разрешены только на публичные http(s)-адреса — недоступны локальные, приватные,
+link-local и другие непубличные IP; после редиректов конечный адрес проверяется
+повторно, переменные окружения прокси игнорируются, таймаут запроса — 30 секунд.
+Разобранные документы хранятся в памяти текущего процесса сервера; для запуска
+нескольких воркеров API или добавления аутентификации потребуется база данных или
+объектное хранилище.
+
+### CLI
 
 ```bash
 # разовый вопрос
@@ -65,6 +93,9 @@ python3 -m pdf_qa_agent.cli path/to/document.pdf -q "О чём этот доку
 
 # интерактивный режим
 python3 -m pdf_qa_agent.cli path/to/document.pdf
+
+# ссылка на PDF вместо локального файла
+python3 -m pdf_qa_agent.cli https://example.com/report.pdf -q "О чём этот отчёт?"
 ```
 
 Программный интерфейс:
@@ -84,11 +115,13 @@ print(result.answer, result.answerable, result.citations)
 python3 -m pytest tests/ -v
 ```
 
-Тесты полностью офлайн (без `ANTHROPIC_API_KEY`):
+Тесты полностью офлайн (без `OPENAI_API_KEY`):
 
 - `test_retry.py` — retry/backoff и обработка временных и постоянных ошибок API;
 - `test_extraction.py` — текстовый слой, OCR fallback, PNG-запрос к VLM и сборка контекста;
+- `test_fetch.py` — SSRF-проверки при загрузке PDF по URL (приватные адреса, редиректы, DNS rebinding, лимит размера);
 - `test_agent.py` — загрузка контекста, структурированный ответ, citations и retry;
+- `test_api.py` — эндпоинты FastAPI: загрузка файла, загрузка по URL, вопросы, лимиты и ошибки;
 - `test_schemas.py`, `test_goldenset.py` — pydantic-схемы и структура golden set.
 
 ## Eval / Golden set

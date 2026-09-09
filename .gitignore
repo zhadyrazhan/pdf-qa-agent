@@ -11,7 +11,7 @@ venv/
 # Secrets
 .env
 
-# Course PDF source files (large binaries, not part of the codebase)
+# PDF source files
 pdf-files/
 
 # Generated eval output
@@ -19,3 +19,10 @@ eval/eval_report.json
 
 # OS
 .DS_Store
+
+# Next.js
+node_modules/
+.next/
+out/
+frontend/.env.local
+*.tsbuildinfo

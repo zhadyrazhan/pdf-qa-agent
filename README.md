@@ -7,14 +7,14 @@ PDF Q&A Agent extracts text from PDF documents—including scanned pages through
 For each PDF page, the agent:
 
 1. Uses the PDF text layer when it contains enough text.
-2. Renders pages with no usable text layer to PNG and sends them to Claude for structured OCR.
+2. Renders pages with no usable text layer to PNG and sends them to OpenAI for structured OCR.
 3. Combines all extracted pages into one context.
-4. Sends the context and the user’s question to Claude, requiring an `AgentAnswer` response with:
+4. Sends the context and the user’s question to OpenAI, requiring an `AgentAnswer` response with:
    - `answer` — the response text;
    - `answerable` — whether the document contains enough information;
    - `citations` — source page numbers and direct excerpts.
 
-Anthropic API calls use exponential backoff with jitter for connection errors, timeouts, rate limits, and temporary server errors.
+OpenAI API calls use exponential backoff with jitter for connection errors, timeouts, rate limits, and temporary server errors.
 
 ## Project structure
 
@@ -33,7 +33,6 @@ eval/
 
 pdf-files/             Source PDFs used by the golden set (gitignored)
 tests/                 Offline pytest suite with mocked API calls
-pdf_qa_agent.py        Backward-compatible CLI entry point
 ```
 
 ## Installation
@@ -43,15 +42,42 @@ cd /Users/zhadyrazhan/Documents/llm-engineer/pdf-qa-agent
 python3 -m pip install -r requirements.txt
 ```
 
-Set an Anthropic API key before using the agent:
+Create your local environment file and add an OpenAI API key before using the agent:
 
 ```bash
-export ANTHROPIC_API_KEY=...
+cp .env.example .env
+# edit .env and set OPENAI_API_KEY=...
 ```
 
 The test suite is fully offline and does not require an API key.
 
 ## Usage
+
+### Web interface
+
+The web interface uses FastAPI for the PDF/Q&A API and Next.js for the frontend.
+Start the API in one terminal:
+
+```bash
+python3 -m pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
+```
+
+Start the Next.js app in another terminal:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open `http://localhost:3000`, upload a PDF, or paste a public PDF URL, and ask
+questions. URL fetching is constrained to HTTP(S) URLs that resolve only to
+public IPs; redirects are checked again, proxy environment variables are
+ignored, requests have a 30-second timeout, and responses are capped at 1 MB
+before parsing. Parsed documents are kept in memory for the current server
+process; use a database or object storage before deploying multiple API workers
+or adding authentication.
 
 Ask one question:
 

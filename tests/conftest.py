@@ -9,7 +9,7 @@ from fpdf import FPDF
 
 @pytest.fixture
 def text_pdf(tmp_path: Path) -> Path:
-    """Простой text-based PDF из двух страниц с реальным текстовым слоем."""
+    """Simple two-page text-based PDF with a real text layer."""
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Helvetica", size=14)
@@ -24,7 +24,7 @@ def text_pdf(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def blank_pdf(tmp_path: Path) -> Path:
-    """PDF из одной пустой (без текста) страницы — имитация скана."""
+    """Single blank (no text) page PDF — simulates a scan."""
     pdf = FPDF()
     pdf.add_page()
     out = tmp_path / "scan.pdf"

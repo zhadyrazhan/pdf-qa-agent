@@ -1,8 +1,8 @@
-"""Retry / exponential backoff для вызовов Anthropic API.
+"""Retry / exponential backoff for OpenAI API calls.
 
-Оборачивает нестабильные сетевые вызовы (rate limit, таймауты, временные 5xx ошибки
-сервера) в повторные попытки с экспоненциально растущей задержкой и джиттером, чтобы
-агент не падал из-за единичного сбоя сети или временной перегрузки API.
+Wraps flaky network calls (rate limits, timeouts, transient 5xx errors) with
+retries using exponential backoff and jitter, so the agent doesn't fail on a
+single network hiccup or momentary API overload.
 """
 from __future__ import annotations
 
@@ -12,18 +12,18 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Tuple, Type, TypeVar
 
-import anthropic
+import openai
 
 T = TypeVar("T")
 
-# Ошибки, при которых имеет смысл повторить запрос: временные сетевые/серверные
-# проблемы и rate limit. Ошибки валидации запроса (4xx кроме 429) не ретраятся —
-# повторный запрос всё равно завершится той же ошибкой.
+# Errors worth retrying: transient network/server issues and rate limits.
+# Request-validation errors (4xx other than 429) aren't retried — a retry
+# would just fail the same way again.
 DEFAULT_RETRYABLE_EXCEPTIONS: Tuple[Type[BaseException], ...] = (
-    anthropic.APIConnectionError,
-    anthropic.APITimeoutError,
-    anthropic.RateLimitError,
-    anthropic.InternalServerError,
+    openai.APIConnectionError,
+    openai.APITimeoutError,
+    openai.RateLimitError,
+    openai.InternalServerError,
 )
 
 
@@ -32,11 +32,11 @@ class RetryConfig:
     max_retries: int = 5
     base_delay: float = 1.0
     max_delay: float = 30.0
-    jitter: float = 0.25  # доля от delay, добавляемая случайным образом (0..jitter*delay)
+    jitter: float = 0.25  # random extra fraction of delay added (0..jitter*delay)
 
 
 class RetryExhaustedError(RuntimeError):
-    """Все попытки исчерпаны — исходная ошибка сохранена в last_error."""
+    """All attempts were exhausted — the original error is kept in last_error."""
 
     def __init__(self, attempts: int, last_error: BaseException):
         super().__init__(f"Retry exhausted after {attempts} attempt(s): {last_error!r}")
@@ -45,7 +45,7 @@ class RetryExhaustedError(RuntimeError):
 
 
 def compute_delay(attempt: int, config: RetryConfig) -> float:
-    """Экспоненциальная задержка с джиттером для номера попытки (1-indexed)."""
+    """Exponential delay with jitter for a given (1-indexed) attempt number."""
     delay = min(config.base_delay * (2 ** (attempt - 1)), config.max_delay)
     return delay + random.uniform(0, config.jitter * delay)
 
@@ -56,10 +56,10 @@ def with_retry(
     sleep_fn: Callable[[float], None] = time.sleep,
     on_retry: Callable[[int, BaseException, float], None] | None = None,
 ):
-    """Декоратор с повторными попытками и экспоненциальным backoff.
+    """Decorator that retries a call with exponential backoff.
 
-    Параметры sleep_fn и on_retry позволяют тестировать логику без реальных
-    задержек и без обращения к сети.
+    sleep_fn and on_retry let tests exercise the logic without real delays
+    or network access.
     """
     cfg = config or RetryConfig()
 
@@ -70,7 +70,7 @@ def with_retry(
             for attempt in range(1, cfg.max_retries + 1):
                 try:
                     return func(*args, **kwargs)
-                except retryable_exceptions as exc:  # noqa: PERF203 - явный контроль ретраев
+                except retryable_exceptions as exc:  # noqa: PERF203 - explicit retry control
                     last_error = exc
                     if attempt == cfg.max_retries:
                         break
