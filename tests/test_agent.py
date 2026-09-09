@@ -1,9 +1,9 @@
-"""Тесты PDFQAAgent: сборка контекста, вызов модели, retry при сбоях API —
-всё с замоканным клиентом Anthropic, без сети."""
+"""Tests for PDFQAAgent: context assembly, model calls, retry on API failures —
+all with a mocked OpenAI client, no network access."""
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import anthropic
+import openai
 import httpx
 import pytest
 
@@ -14,7 +14,9 @@ from pdf_qa_agent.schemas import AgentAnswer, Citation, PageContent
 
 def _mock_client_returning(answer: AgentAnswer) -> MagicMock:
     client = MagicMock()
-    client.messages.parse.return_value = SimpleNamespace(parsed_output=answer)
+    client.chat.completions.parse.return_value = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(parsed=answer))]
+    )
     return client
 
 
@@ -46,7 +48,7 @@ def test_ask_returns_structured_answer_with_citations():
 
     assert result.answerable is True
     assert result.citations[0].page == 1
-    client.messages.parse.assert_called_once()
+    client.chat.completions.parse.assert_called_once()
 
 
 def test_ask_sends_full_context_and_question_to_model():
@@ -55,12 +57,12 @@ def test_ask_sends_full_context_and_question_to_model():
 
     agent.ask("Who founded the company?")
 
-    call_kwargs = client.messages.parse.call_args.kwargs
-    user_message = call_kwargs["messages"][0]["content"]
+    call_kwargs = client.chat.completions.parse.call_args.kwargs
+    user_message = call_kwargs["messages"][1]["content"]
     assert "Jane Doe" in user_message
     assert "1,234,567" in user_message
     assert "Who founded the company?" in user_message
-    assert call_kwargs["output_format"] is AgentAnswer
+    assert call_kwargs["response_format"] is AgentAnswer
 
 
 def test_ask_marks_unanswerable_when_model_says_so():
@@ -75,28 +77,28 @@ def test_ask_marks_unanswerable_when_model_says_so():
 
 
 def test_ask_retries_on_transient_error_then_succeeds():
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
     expected = AgentAnswer(answer="ok", answerable=True)
     client = MagicMock()
-    client.messages.parse.side_effect = [
-        anthropic.APIConnectionError(request=request),
-        SimpleNamespace(parsed_output=expected),
+    client.chat.completions.parse.side_effect = [
+        openai.APIConnectionError(request=request),
+        SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(parsed=expected))]),
     ]
     agent = _agent_with_loaded_pages(client, retry_config=RetryConfig(max_retries=3, base_delay=0.001))
 
     result = agent.ask("question")
 
     assert result.answerable is True
-    assert client.messages.parse.call_count == 2
+    assert client.chat.completions.parse.call_count == 2
 
 
 def test_ask_raises_retry_exhausted_after_persistent_failures():
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
     client = MagicMock()
-    client.messages.parse.side_effect = anthropic.APIConnectionError(request=request)
+    client.chat.completions.parse.side_effect = openai.APIConnectionError(request=request)
     agent = _agent_with_loaded_pages(client, retry_config=RetryConfig(max_retries=2, base_delay=0.001))
 
     with pytest.raises(RetryExhaustedError):
         agent.ask("question")
 
-    assert client.messages.parse.call_count == 2
+    assert client.chat.completions.parse.call_count == 2

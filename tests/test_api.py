@@ -1,15 +1,16 @@
-"""Тесты FastAPI-эндпоинтов (api/main.py): upload по файлу, upload по URL, вопрос-ответ.
+"""Tests for the FastAPI endpoints (main.py): file upload, URL upload, Q&A.
 
-Полностью офлайн: `_parse_pdf` (единственное место, где вызывается Anthropic API и
-pdf_qa_agent.fetch) подменяется через monkeypatch на фейковый агент — тесты проверяют
-маршрутизацию, валидацию запроса и маппинг ошибок в HTTP-статусы, а не саму логику
-извлечения/OCR (она уже покрыта test_extraction.py и test_fetch.py)."""
+Fully offline: `_parse_pdf` (the only place that calls the OpenAI API and
+pdf_qa_agent.fetch) is replaced via monkeypatch with a fake agent — these tests
+cover routing, request validation, and error-to-HTTP-status mapping, not the
+extraction/OCR logic itself (already covered by test_extraction.py and
+test_fetch.py)."""
 from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
 
-import api.main as api_main
+import main as api_main
 from pdf_qa_agent.fetch import PDFFetchError, PDFTooLargeError, UnsafeURLError
 from pdf_qa_agent.schemas import AgentAnswer, Citation, PageContent
 
@@ -78,6 +79,7 @@ def test_upload_document_rejects_oversized_file(client, monkeypatch):
         files={"file": ("report.pdf", MINIMAL_PDF, "application/pdf")},
     )
     assert response.status_code == 413
+    assert response.json()["detail"] == "File needs to be less than 1 MB"
 
 
 def test_upload_from_url_success(client, monkeypatch):
@@ -124,6 +126,7 @@ def test_upload_from_url_rejects_oversized_pdf(client, monkeypatch):
     response = client.post("/api/documents/from-url", json={"url": "https://example.com/big.pdf"})
 
     assert response.status_code == 413
+    assert response.json()["detail"] == "File needs to be less than 1 MB"
 
 
 def test_upload_from_url_maps_fetch_error_to_422(client, monkeypatch):

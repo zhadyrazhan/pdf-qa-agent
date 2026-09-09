@@ -1,5 +1,5 @@
-"""Проверка структуры golden set (eval/goldenset.json) — быстрый sanity-check без сети,
-чтобы опечатка в JSON или отсутствующее поле ловились в CI, а не при запуске eval."""
+"""Checks the golden set's structure (eval/goldenset.json) — a fast, network-free
+sanity check so a JSON typo or missing field is caught in CI, not during eval."""
 import json
 from pathlib import Path
 
@@ -43,8 +43,8 @@ def test_answerable_items_have_at_least_one_keyword():
 
 
 def test_covers_both_text_layer_and_scanned_documents():
-    """Golden set должен включать вопросы и к тексто-слойным, и к отсканированным
-    частям документов — иначе eval не проверяет требуемое поведение агента."""
+    """The golden set must cover both text-layer and scanned parts of documents,
+    or eval won't exercise the agent's required behavior."""
     notes = " ".join(item.get("note", "") for item in _load())
     assert "OCR" in notes
     assert "текстовый слой" in notes

@@ -1,27 +1,24 @@
-"""Безопасная загрузка PDF по URL.
+"""Safely downloads a PDF from a URL.
 
-Используется, когда пользователь передаёт агенту не локальный путь, а http(s)-ссылку
-на PDF (например, через веб-интерфейс). Так как сервер сам делает исходящий запрос по
-адресу, полученному от пользователя, это классический вектор SSRF (Server-Side Request
-Forgery): без проверок ссылка вида ``http://169.254.169.254/latest/meta-data`` или
-``http://localhost:6379`` заставит сервер обратиться к внутренней инфраструктуре, а не к
-внешнему PDF.
+A server-side fetch of a user-supplied URL is a classic SSRF vector: without
+checks, a link like ``http://169.254.169.254/latest/meta-data`` would make the
+server hit internal infrastructure instead of an external PDF. Defenses here
+(best-effort, not an absolute guarantee — see "Known limitations" in the README):
 
-Меры защиты здесь (best-effort, не абсолютная гарантия — см. "Известные ограничения"
-в README):
-  - разрешены только схемы http/https;
-  - хост резолвится через DNS, и если ХОТЯ БЫ ОДИН из полученных адресов приватный,
-    loopback, link-local, multicast, reserved или unspecified — запрос отклоняется;
-  - после HTTP-редиректов конечный хост резолвится и проверяется повторно (простой
-    редирект на внутренний адрес не проходит проверку);
-  - размер скачиваемого файла ограничен (проверка Content-Length и потоковый подсчёт,
-    чтобы не полагаться только на заголовок);
-  - скачанный контент должен начинаться с сигнатуры ``%PDF-``.
+  - only http/https schemes are allowed;
+  - the host is resolved via DNS and rejected if any resolved address is
+    private, loopback, link-local, multicast, reserved, or unspecified;
+  - after HTTP redirects, the final host is resolved and checked again (a
+    redirect to an internal address doesn't slip through);
+  - download size is capped (Content-Length check plus a streamed count, so a
+    missing/wrong header can't be used to bypass it);
+  - the downloaded content must start with the ``%PDF-`` signature.
 
-Для защиты от DNS rebinding собственный httpcore transport повторно резолвит домен
-непосредственно перед TCP-подключением и подключается к проверенному IP, сохраняя
-исходное имя хоста для TLS/SNI. Переменные окружения прокси отключены, чтобы запрос
-нельзя было незаметно перенаправить через внешний proxy.
+To guard against DNS rebinding, a custom httpcore transport re-resolves the
+hostname immediately before opening the TCP connection and connects to that
+verified IP, while keeping the original hostname for TLS/SNI. Proxy
+environment variables are disabled so the request can't be silently redirected
+through an external proxy.
 """
 from __future__ import annotations
 
@@ -37,7 +34,7 @@ from httpx._transports.default import ResponseStream, map_httpcore_exceptions
 
 _URL_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://")
 
-DEFAULT_MAX_PDF_BYTES = 25 * 1024 * 1024  # 25 MB — совпадает с лимитом загрузки файла в API
+DEFAULT_MAX_PDF_BYTES = 1 * 1024 * 1024  # 1 MB — matches the API's file upload limit
 DEFAULT_FETCH_TIMEOUT = 30.0
 DEFAULT_MAX_REDIRECTS = 5
 PDF_MAGIC = b"%PDF-"
@@ -46,15 +43,15 @@ ALLOWED_SCHEMES = ("http", "https")
 
 
 class UnsafeURLError(ValueError):
-    """URL отклонён проверкой SSRF (недопустимая схема или адрес)."""
+    """URL rejected by the SSRF check (disallowed scheme or address)."""
 
 
 class PDFTooLargeError(ValueError):
-    """Скачиваемый файл превышает допустимый размер."""
+    """The downloaded file exceeds the allowed size."""
 
 
 class PDFFetchError(RuntimeError):
-    """Сетевая ошибка, HTTP-ошибка или содержимое не похоже на PDF."""
+    """Network error, HTTP error, or the content doesn't look like a PDF."""
 
 
 def is_url(source: str) -> bool:
@@ -179,10 +176,10 @@ def fetch_pdf_bytes(
     timeout: float = DEFAULT_FETCH_TIMEOUT,
     client: httpx.Client | None = None,
 ) -> bytes:
-    """Скачивает PDF по URL с SSRF-проверками и лимитом размера.
+    """Downloads a PDF from a URL with SSRF checks and a size cap.
 
-    Параметр `client` позволяет передать заранее сконфигурированный httpx.Client
-    (например, с MockTransport) в тестах, не обращаясь к сети.
+    `client` lets tests pass a preconfigured httpx.Client (e.g. with a
+    MockTransport) without touching the network.
     """
     _validate_host(url)
 
@@ -197,8 +194,8 @@ def fetch_pdf_bytes(
     try:
         try:
             with http_client.stream("GET", url) as response:
-                # После редиректов проверяем финальный хост тоже — иначе первая проверка
-                # обходится редиректом на внутренний адрес.
+                # Re-check the final host after redirects too, or the first
+                # check could be bypassed by redirecting to an internal address.
                 _validate_host(str(response.url))
 
                 if response.status_code >= 400:
@@ -214,7 +211,7 @@ def fetch_pdf_bytes(
                         raise PDFFetchError("Origin returned an invalid Content-Length header")
                     if declared_size > max_bytes:
                         raise PDFTooLargeError(
-                            f"PDF at {url} is {declared_size} bytes, exceeds max of {max_bytes} bytes"
+                            "File needs to be less than 1 MB"
                         )
 
                 chunks: list[bytes] = []
@@ -223,7 +220,7 @@ def fetch_pdf_bytes(
                     total += len(chunk)
                     if total > max_bytes:
                         raise PDFTooLargeError(
-                            f"PDF at {url} exceeds max size of {max_bytes} bytes while streaming"
+                            "File needs to be less than 1 MB"
                         )
                     chunks.append(chunk)
         except httpx.HTTPError as exc:

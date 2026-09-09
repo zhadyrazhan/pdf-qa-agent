@@ -1,10 +1,12 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useState } from "react";
+import { ChangeEvent, DragEvent, FormEvent, useState } from "react";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+// Requests go through the Next.js rewrite so local development and deployed
+// frontends do not depend on a browser-visible localhost API origin.
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
-type Page = { page: number; text: string; source: "text_layer" | "vlm_ocr" };
+type Page = { page: number; text: string; source: "text_layer" | "vlm_ocr" | "ocr_failed" };
 type Citation = { page: number; excerpt: string };
 type Document = { id: string; name: string; pages: Page[]; text_layer_pages: number; ocr_pages: number };
 type Message = { role: "user" | "assistant"; content: string; citations?: Citation[] };
@@ -20,6 +22,8 @@ async function readError(response: Response): Promise<string> {
 
 type Source = "file" | "url";
 
+const MAX_FILE_BYTES = 1 * 1024 * 1024;
+
 export default function Home() {
   const [document, setDocument] = useState<Document | null>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -29,13 +33,31 @@ export default function Home() {
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [isDragging, setIsDragging] = useState(false);
 
-  function chooseFile(event: ChangeEvent<HTMLInputElement>) {
-    const selected = event.target.files?.[0] ?? null;
+  function setSelectedFile(selected: File | null) {
+    if (selected && !selected.name.toLowerCase().endsWith(".pdf")) {
+      setError("Please choose a PDF file.");
+      return;
+    }
+    if (selected && selected.size > MAX_FILE_BYTES) {
+      setError("File is too large — please choose a PDF under 1 MB.");
+      return;
+    }
     setFile(selected);
     setDocument(null);
     setMessages([]);
     setError("");
+  }
+
+  function chooseFile(event: ChangeEvent<HTMLInputElement>) {
+    setSelectedFile(event.target.files?.[0] ?? null);
+  }
+
+  function dropFile(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    setIsDragging(false);
+    setSelectedFile(event.dataTransfer.files?.[0] ?? null);
   }
 
   function chooseSource(next: Source) {
@@ -58,7 +80,7 @@ export default function Home() {
       setDocument((await response.json()) as Document);
       setMessages([]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not upload the PDF");
+      setError(err instanceof TypeError ? "Could not connect to the PDF service. Check that the API is running." : err instanceof Error ? err.message : "Could not upload the PDF");
     } finally {
       setLoading(false);
     }
@@ -80,7 +102,7 @@ export default function Home() {
       setDocument((await response.json()) as Document);
       setMessages([]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load the PDF from that URL");
+      setError(err instanceof TypeError ? "Could not connect to the PDF service. Check that the API is running." : err instanceof Error ? err.message : "Could not load the PDF from that URL");
     } finally {
       setLoading(false);
     }
@@ -104,7 +126,7 @@ export default function Home() {
       const answer = (await response.json()) as { answer: string; citations: Citation[] };
       setMessages((current) => [...current, { role: "assistant", content: answer.answer, citations: answer.citations }]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not answer the question");
+      setError(err instanceof TypeError ? "Could not connect to the PDF service. Check that the API is running." : err instanceof Error ? err.message : "Could not answer the question");
     } finally {
       setLoading(false);
     }
@@ -113,16 +135,18 @@ export default function Home() {
   return (
     <main className="shell">
       <header className="hero">
-        <div className="eyebrow">Grounded document intelligence</div>
-        <h1>Ask your PDF anything.</h1>
-        <p>Upload a document, let the agent extract its text, and get answers with page-level citations.</p>
+        <h1>PDF Q&amp;A agent</h1>
+        <p>Upload a document or provide url, let the agent extract its text, and get answers with page-level citations.</p>
       </header>
 
       <section className="workspace">
-        <aside className="upload-panel">
-          <div className="section-label">01 · Upload</div>
-          <h2>Choose a PDF</h2>
-          <p className="muted">Text pages are extracted directly. Scanned pages are read with vision OCR.</p>
+        <section className="upload-panel">
+          <div className="upload-heading">
+            <div>
+              <h2>Choose a PDF</h2>
+              <p className="muted">Text is extracted automatically, including scanned pages. The document should be less than <b>1 MB</b>.</p>
+            </div>
+          </div>
 
           <div className="source-toggle" role="tablist" aria-label="PDF source">
             <button
@@ -147,14 +171,14 @@ export default function Home() {
 
           {source === "file" ? (
             <form onSubmit={upload}>
-              <label className="dropzone">
+              <label className={`dropzone ${isDragging ? "dragging" : ""}`} onDragEnter={() => setIsDragging(true)} onDragOver={(event) => event.preventDefault()} onDragLeave={() => setIsDragging(false)} onDrop={dropFile}>
                 <input type="file" accept="application/pdf,.pdf" onChange={chooseFile} />
-                <span className="file-icon">↑</span>
+                <span className="file-icon">+</span>
                 <strong>{file ? file.name : "Drop a PDF here"}</strong>
-                <span>{file ? `${(file.size / 1024 / 1024).toFixed(1)} MB selected` : "or click to browse · max 25 MB"}</span>
+                <span>{file ? `${(file.size / 1024 / 1024).toFixed(1)} MB selected` : "or click to browse · max 1 MB"}</span>
               </label>
-              <button className="primary-button" disabled={!file || loading} type="submit">
-                {loading && !document ? "Parsing…" : "Parse document"}
+              <button className={`primary-button${document ? " parsed" : ""}`} disabled={!file || loading} type="submit">
+                {loading && !document ? "Parsing…" : document ? "Ready" : "Parse document"}
               </button>
             </form>
           ) : (
@@ -187,10 +211,9 @@ export default function Home() {
             </div>
           )}
           {error && <div className="error">{error}</div>}
-        </aside>
+        </section>
 
         <section className="chat-panel">
-          <div className="section-label">02 · Ask questions</div>
           <h2>Conversation</h2>
           {!document ? (
             <div className="empty-state"><span>✦</span><p>Your answers will appear here<br />after you parse a document.</p></div>
@@ -226,7 +249,7 @@ export default function Home() {
           <div className="page-list">
             {document.pages.map((page) => (
               <details key={page.page}>
-                <summary>Page {page.page}<span>{page.source === "text_layer" ? "Text layer" : "VLM OCR"}</span></summary>
+                <summary>Page {page.page}<span>{page.source === "text_layer" ? "Text layer" : page.source === "vlm_ocr" ? "VLM OCR" : "OCR failed"}</span></summary>
                 <div className="page-text">{page.text}</div>
               </details>
             ))}

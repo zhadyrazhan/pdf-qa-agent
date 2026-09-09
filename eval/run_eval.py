@@ -1,12 +1,12 @@
-"""Прогон PDF Q&A агента по golden set и подсчёт метрик качества.
+"""Runs PDF-QA-Agent against the golden set and reports quality metrics.
 
-Golden set (goldenset.json) — набор вопросов к трём реальным документам разного
-качества (text-based отчёт, скан книги, скан со сложными диаграммами), с ожидаемым
-answerable-флагом, ключевыми словами, которые должны встретиться в ответе, и
-страницами, на которые агент должен сослаться.
+The golden set (goldenset.json) is a set of questions against three real
+documents of varying quality (a text-based report, a scanned book, a scan with
+complex diagrams), each with an expected answerable flag, keywords expected in
+the answer, and pages the agent should cite.
 
-Использование:
-    python3 eval/run_eval.py                       # весь golden set
+Usage:
+    python3 eval/run_eval.py                       # full golden set
     python3 eval/run_eval.py --ids book-author,charts-fig7-subject
     python3 eval/run_eval.py --pdf-root /custom/path/to/pdf-files
 """
@@ -34,10 +34,10 @@ DEFAULT_PDF_ROOT = Path(__file__).resolve().parents[1] / "pdf-files"
 
 
 def _normalize(text: str) -> str:
-    """Приводит текст к сравнимому виду: нижний регистр, без пробелов/точек/запятых.
+    """Normalizes text for comparison: lowercase, no spaces/dots/commas.
 
-    Позволяет сопоставлять числа независимо от формата разделителей разрядов
-    (1.529.951.443 / 1 529 951 443 / 1529951443) и не зависеть от регистра слов.
+    Lets numbers match regardless of thousands-separator style
+    (1.529.951.443 / 1 529 951 443 / 1529951443) and ignores word casing.
     """
     return re.sub(r"[\s.,]", "", text.strip().lower())
 
@@ -103,7 +103,7 @@ def run_eval(
         print(f"[ask]  {item['id']}: {item['question']}", file=sys.stderr)
         try:
             answer = agent.ask(item["question"])
-        except Exception as exc:  # noqa: BLE001 - записываем в отчёт любую ошибку прогона
+        except Exception as exc:  # noqa: BLE001 - record any run error in the report
             print(f"  !! error: {exc!r}", file=sys.stderr)
             results.append({**item, "error": repr(exc)})
             continue
@@ -176,10 +176,10 @@ def print_report(report: dict) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Прогон PDF Q&A агента по golden set.")
+    parser = argparse.ArgumentParser(description="Runs PDF-QA-Agent against the golden set.")
     parser.add_argument("--goldenset", type=Path, default=GOLDENSET_PATH)
-    parser.add_argument("--pdf-root", type=Path, default=DEFAULT_PDF_ROOT, help="Базовая директория для относительных путей PDF в golden set")
-    parser.add_argument("--ids", help="Список id через запятую — прогнать только их")
+    parser.add_argument("--pdf-root", type=Path, default=DEFAULT_PDF_ROOT, help="Base directory for relative PDF paths in the golden set")
+    parser.add_argument("--ids", help="Comma-separated list of ids to run only those")
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--max-retries", type=int, default=5)
     parser.add_argument("--out", type=Path, default=REPORT_PATH)

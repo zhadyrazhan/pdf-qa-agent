@@ -11,7 +11,7 @@ venv/
 # Secrets
 .env
 
-# Course PDF source files (large binaries, not part of the codebase)
+# PDF source files
 pdf-files/
 
 # Generated eval output

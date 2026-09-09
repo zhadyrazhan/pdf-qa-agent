@@ -1,39 +1,39 @@
-"""Pydantic-схемы, используемые агентом для извлечения и структурированных ответов."""
+"""Pydantic schemas used by the agent for extraction and structured answers."""
 from typing import List, Literal
 
 from pydantic import BaseModel, Field
 
 
 class ExtractedPage(BaseModel):
-    """Результат VLM OCR одной отсканированной страницы."""
+    """VLM OCR result for a single scanned page."""
 
     text: str = Field(
         description=(
-            "Полный текст страницы с сохранением структуры в виде markdown "
-            "(заголовки как '# ...', абзацы, списки, подписи таблиц/рисунков)"
+            "Full page text, preserving structure as markdown "
+            "(headings as '# ...', paragraphs, lists, table/figure captions)"
         )
     )
 
 
 class PageContent(BaseModel):
-    """Извлечённое содержимое одной страницы документа, независимо от источника."""
+    """A single page's extracted content, regardless of source."""
 
     page: int
     text: str
-    source: Literal["text_layer", "vlm_ocr"]
+    source: Literal["text_layer", "vlm_ocr", "ocr_failed"]
 
 
 class Citation(BaseModel):
-    page: int = Field(description="Номер страницы источника в документе")
-    excerpt: str = Field(description="Короткая дословная цитата из документа, подтверждающая ответ")
+    page: int = Field(description="Source page number in the document")
+    excerpt: str = Field(description="Short verbatim quote from the document supporting the answer")
 
 
 class AgentAnswer(BaseModel):
-    answer: str = Field(description="Ответ на вопрос пользователя на основе документа")
+    answer: str = Field(description="Answer to the user's question based on the document")
     answerable: bool = Field(
-        description="True, если в документе достаточно информации для ответа, иначе False"
+        description="True if the document has enough information to answer, otherwise False"
     )
     citations: List[Citation] = Field(
         default_factory=list,
-        description="Страницы и цитаты из документа, использованные для ответа",
+        description="Pages and quotes from the document used to support the answer",
     )

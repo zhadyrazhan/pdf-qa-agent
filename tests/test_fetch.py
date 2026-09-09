@@ -1,7 +1,8 @@
-"""Тесты загрузки PDF по URL: SSRF-проверки, лимит размера, проверка сигнатуры PDF.
+"""Tests for URL-based PDF downloads: SSRF checks, size cap, PDF signature check.
 
-Полностью офлайн — DNS-резолвинг подменяется через monkeypatch (без реального сетевого
-резолва), а HTTP-запросы идут через httpx.MockTransport (без реальных обращений к сети).
+Fully offline — DNS resolution is replaced via monkeypatch (no real network
+resolution), and HTTP requests go through httpx.MockTransport (no real network
+calls).
 """
 import httpx
 import pytest
@@ -18,14 +19,14 @@ PDF_BYTES = b"%PDF-1.4\n%mock pdf content\n%%EOF"
 
 
 def _fake_addrinfo(ip: str):
-    """Форма возврата socket.getaddrinfo, достаточная для _validate_host."""
+    """A socket.getaddrinfo() return shape sufficient for _validate_host."""
     return [(2, 1, 6, "", (ip, 0))]
 
 
 @pytest.fixture(autouse=True)
 def _no_real_dns(monkeypatch):
-    """По умолчанию все тесты резолвят любой хост в публичный IP — без реального DNS.
-    Отдельные тесты переопределяют это через monkeypatch внутри теста."""
+    """By default, every test resolves any host to a public IP — no real DNS.
+    Individual tests override this with their own monkeypatch."""
     monkeypatch.setattr(
         "pdf_qa_agent.fetch.socket.getaddrinfo",
         lambda host, port: _fake_addrinfo("93.184.216.34"),
@@ -128,7 +129,7 @@ def test_rejects_when_streamed_body_exceeds_max_without_content_length_header():
     big_body = PDF_BYTES + b"0" * 1000
 
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, content=big_body)  # без content-length
+        return httpx.Response(200, content=big_body)  # no content-length
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
     with pytest.raises(PDFTooLargeError):
@@ -163,11 +164,12 @@ def test_raises_pdf_fetch_error_on_network_failure():
 
 
 def test_host_is_revalidated_after_response_received(monkeypatch):
-    """fetch_pdf_bytes проверяет хост дважды: до запроса (по URL) и после ответа
-    (по response.url, который отражает финальный адрес после редиректов). Здесь мы
-    подменяем DNS так, будто между двумя проверками резолвинг изменился на приватный
-    адрес (упрощённая модель редиректа/DNS rebinding) — вторая проверка должна поймать
-    это и отклонить запрос, даже когда исходный хост выглядел публичным."""
+    """fetch_pdf_bytes checks the host twice: before the request (by URL) and
+    after the response (by response.url, which reflects the final address after
+    redirects). Here DNS is faked so resolution changes to a private address
+    between the two checks (a simplified redirect/DNS-rebinding model) — the
+    second check must catch this and reject the request, even though the
+    original host looked public."""
     calls = {"n": 0}
 
     def fake_getaddrinfo(host, port):
@@ -183,4 +185,4 @@ def test_host_is_revalidated_after_response_received(monkeypatch):
     with pytest.raises(UnsafeURLError, match="non-public"):
         fetch_pdf_bytes("https://example.com/report.pdf", client=client)
 
-    assert calls["n"] == 2  # обе проверки хоста действительно выполнились
+    assert calls["n"] == 2  # both host checks actually ran

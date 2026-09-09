@@ -1,10 +1,11 @@
 """HTTP API for uploading PDFs and asking grounded questions about them.
 
 Run with:
-    uvicorn api.main:app --reload --port 8000
+    uvicorn main:app --reload --port 8000
 """
 from __future__ import annotations
 
+import logging
 import os
 import tempfile
 import uuid
@@ -16,6 +17,8 @@ from urllib.parse import urlparse
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
+from openai import OpenAI
 from pydantic import BaseModel, ConfigDict, Field
 
 from pdf_qa_agent.agent import PDFQAAgent
@@ -23,12 +26,21 @@ from pdf_qa_agent.extraction import DEFAULT_MODEL, PDFExtractor
 from pdf_qa_agent.fetch import PDF_MAGIC, PDFFetchError, PDFTooLargeError, UnsafeURLError
 from pdf_qa_agent.schemas import AgentAnswer
 
-MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+load_dotenv()
+
+logger = logging.getLogger(__name__)
+
+MAX_UPLOAD_BYTES = 1 * 1024 * 1024
 ALLOWED_ORIGINS = [
     origin.strip()
     for origin in os.getenv("FRONTEND_ORIGIN", "http://localhost:3000").split(",")
     if origin.strip()
 ]
+# Browsers commonly resolve localhost and 127.0.0.1 differently. Keep both
+# available for direct API access; the Next rewrite still avoids CORS in normal use.
+for local_origin in ("http://localhost:3000", "http://127.0.0.1:3000"):
+    if local_origin not in ALLOWED_ORIGINS:
+        ALLOWED_ORIGINS.append(local_origin)
 
 
 @dataclass
@@ -88,13 +100,11 @@ app.add_middleware(
 documents: dict[str, DocumentSession] = {}
 
 
-def _client() -> object:
-    import anthropic
-
-    api_key = os.getenv("ANTHROPIC_API_KEY")
+def _client() -> OpenAI:
+    api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY is not configured")
-    return anthropic.Anthropic(api_key=api_key)
+        raise HTTPException(status_code=500, detail="OPENAI_API_KEY is not configured")
+    return OpenAI(api_key=api_key)
 
 
 def _parse_pdf(source: str | Path, model: str) -> PDFQAAgent:
@@ -135,7 +145,7 @@ async def upload_document(
             while chunk := await file.read(1024 * 1024):
                 size += len(chunk)
                 if size > MAX_UPLOAD_BYTES:
-                    raise HTTPException(status_code=413, detail="PDF must be 25 MB or smaller")
+                    raise HTTPException(status_code=413, detail="File needs to be less than 1 MB")
                 if not header:
                     header = chunk[: len(PDF_MAGIC)]
                 temp_file.write(chunk)
@@ -157,6 +167,7 @@ async def upload_document(
     except HTTPException:
         raise
     except Exception as exc:
+        logger.exception("Failed to parse uploaded PDF %r", filename)
         raise HTTPException(status_code=422, detail="Could not parse PDF") from exc
     finally:
         if temp_path:
@@ -180,10 +191,11 @@ async def upload_document_from_url(request: DocumentFromURLRequest) -> DocumentR
     except UnsafeURLError:
         raise HTTPException(status_code=400, detail="URL must resolve to a public HTTP(S) address")
     except PDFTooLargeError:
-        raise HTTPException(status_code=413, detail="PDF must be 25 MB or smaller")
+        raise HTTPException(status_code=413, detail="File needs to be less than 1 MB")
     except PDFFetchError:
         raise HTTPException(status_code=422, detail="Could not fetch a PDF from that URL")
     except Exception:
+        logger.exception("Failed to parse PDF from URL %r", request.url)
         raise HTTPException(status_code=422, detail="Could not parse PDF from that URL")
 
     document_id = uuid.uuid4().hex
@@ -208,4 +220,5 @@ async def ask_question(document_id: str, request: QuestionRequest) -> AnswerResp
         result: AgentAnswer = await run_in_threadpool(session.agent.ask, request.question)
         return AnswerResponse.model_validate(result)
     except Exception as exc:
+        logger.exception("Failed to answer question for document %r", document_id)
         raise HTTPException(status_code=502, detail="Could not answer the question") from exc

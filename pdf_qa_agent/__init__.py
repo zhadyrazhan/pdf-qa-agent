@@ -1,7 +1,11 @@
-"""PDF Q&A Agent — отвечает на вопросы пользователя по содержимому PDF-документа.
+"""PDF-QA-Agent answers questions about a PDF document's content.
 
-Работает как с text-based PDF (текстовый слой), так и со сканами (VLM OCR fallback).
+Handles both text-based PDFs (text layer) and scans (VLM OCR fallback).
 """
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from pdf_qa_agent.agent import PDFQAAgent
 from pdf_qa_agent.schemas import AgentAnswer, Citation, ExtractedPage, PageContent
 
